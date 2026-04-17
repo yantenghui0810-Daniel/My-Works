@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>🏠 小晏私厨</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <style>
+        :root { --main-color: #ff6b81; --bg-color: #fdfaf6; --card-bg: #ffffff; --edit-color: #1890ff; }
+        
+        body { font-family: -apple-system, sans-serif; background: var(--bg-color); margin: 0; padding: 20px 20px 180px 20px; -webkit-tap-highlight-color: transparent; }
+        
+        h1 { text-align: center; margin-bottom: 30px; user-select: none; }
+        
+        .category-section { margin-bottom: 15px; background: var(--card-bg); border-radius: 18px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+
+        .category-header { padding: 16px; display: flex; align-items: center; background: white; cursor: pointer; }
+        
+        /* 拖动手柄 */
+        .drag-handle { display: none; padding-right: 15px; color: #ccc; cursor: move; font-size: 20px; user-select: none; }
+        .boss-mode .drag-handle { display: block; }
+
+        .title-area { flex-grow: 1; display: flex; align-items: center; overflow: hidden; }
+        .title-text { font-weight: bold; font-size: 1.1rem; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+        
+        /* 编辑状态样式 */
+        .boss-mode .editable { 
+            color: var(--edit-color); 
+            border-bottom: 1px dashed var(--edit-color); 
+            cursor: text;
+        }
+
+        .arrow { font-size: 12px; color: #bbb; transition: 0.3s; margin-left: 10px; }
+        .expanded .arrow { transform: rotate(180deg); }
+
+        .category-content { display: none; padding: 0 16px 10px 16px; border-top: 1px solid #f9f9f9; }
+        .expanded .category-content { display: block; }
+
+        .menu-item { display: flex; align-items: center; padding: 15px 0; border-bottom: 1px solid #fcfcfc; }
+        .menu-item:last-child { border-bottom: none; }
+
+        .delete-btn { 
+            display: none; 
+            background: #fff5f5; 
+            color: #ff7875; 
+            font-size: 11px; 
+            padding: 4px 10px; 
+            border-radius: 6px; 
+            margin-left: 10px;
+            white-space: nowrap;
+        }
+        .boss-mode .delete-btn { display: inline-block; }
+
+        #cart-bar { position: fixed; bottom: 20px; left: 15px; right: 15px; background: rgba(50,50,50,0.95); backdrop-filter: blur(10px); color: white; padding: 15px; border-radius: 20px; display: none; flex-direction: column; gap: 10px; z-index: 1000; }
+        #send-btn { background: var(--main-color); color: white; border: none; padding: 10px 20px; border-radius: 12px; font-weight: bold; }
+        #note-input { background: rgba(255,255,255,0.1); border: none; color: white; padding: 10px; border-radius: 10px; width: 100%; box-sizing: border-box; }
+
+        #admin-panel { margin-top: 40px; padding: 20px; border-radius: 20px; background: #eee; display: none; }
+        .admin-input { width: 100%; padding: 12px; margin-bottom: 10px; border-radius: 10px; border: 1px solid #ddd; box-sizing: border-box; }
+        
+        .add-btn { background: white; color: var(--main-color); border: 2px solid var(--main-color); width: 30px; height: 30px; border-radius: 50%; font-weight: bold; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    </style>
+</head>
+<body id="main-body">
+
+    <h1 onclick="handleBossClick()">🍯 MANING的专属食堂</h1>
+    <div id="loading" style="text-align: center; color: #999;">载入云端数据...</div>
+    <div id="menu-render"></div>
+
+    <div id="cart-bar">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div id="cart-info">已选 0 份</div>
+            <button id="send-btn" onclick="sendOrderBatch()">确认下单</button>
+        </div>
+        <input type="text" id="note-input" placeholder="输入备注 (可选)">
+    </div>
+
+    <div id="admin-panel">
+        <h3>🛠 餐厅管理</h3>
+        <p style="font-size: 12px; color: #666; margin-bottom: 10px;">💡 提示：管理模式下点击蓝色文字可直接编辑</p>
+        <input type="text" id="cat-input" class="admin-input" placeholder="新分类名称">
+        <button onclick="addCategory()" style="width:100%; padding:10px; margin-bottom:20px;">创建分类</button>
+        <select id="cat-select" class="admin-input"></select>
+        <input type="text" id="food-input" class="admin-input" placeholder="新菜品名称">
+        <button onclick="addFood()" style="width:100%; padding:10px; margin-bottom:20px;">添加菜品</button>
+        <button onclick="saveToCloud()" style="width:100%; padding:15px; background:#2ed573; color:white; border:none; border-radius:10px; font-weight:bold;">💾 保存并退出管理</button>
+    </div>
+
+<script>
+    // ======= 参数区 =======
+    const BARK_KEY = "4UwLoRt8dE3MViNUDeiLmb"; 
+    const SB_URL = "https://jobddgrzscqkohzkmowu.supabase.co";
+    const SB_KEY = "sb_publishable_D1_QYmos6K3uwsAUwPWcnA_YpoMgcDV";
+    // =====================
+
+    const supabaseClient = supabase.createClient(SB_URL, SB_KEY);
+    let menuData = [];
+    let cart = {};
+    let bossClickCount = 0;
+    let isBossMode = false;
+
+    function handleBossClick() {
+        bossClickCount++;
+        if (bossClickCount === 5) {
+            isBossMode = true;
+            document.getElementById('main-body').classList.add('boss-mode');
+            document.getElementById('admin-panel').style.display = 'block';
+            initDraggable();
+            render(); // 重新渲染以显示编辑状态
+            alert("编辑模式已开启：点击蓝色文字即可修改名称");
+            bossClickCount = 0;
+        }
+        setTimeout(() => { bossClickCount = 0; }, 3000);
+    }
+
+    function initDraggable() {
+        Sortable.create(document.getElementById('menu-render'), {
+            animation: 150,
+            handle: '.drag-handle',
+            onEnd: function() {
+                const newOrder = [];
+                document.querySelectorAll('.category-section').forEach(sec => {
+                    newOrder.push(menuData[sec.dataset.index]);
+                });
+                menuData = newOrder;
+                render(); 
+                initDraggable();
+            }
+        });
+        document.querySelectorAll('.category-content').forEach(el => {
+            Sortable.create(el, {
+                animation: 150,
+                handle: '.drag-handle',
+                onEnd: function(evt) {
+                    const catIdx = evt.from.dataset.catIdx;
+                    const items = menuData[catIdx].items;
+                    const [movedItem] = items.splice(evt.oldIndex, 1);
+                    items.splice(evt.newIndex, 0, movedItem);
+                }
+            });
+        });
+    }
+
+    // 编辑分类名称
+    function editCategoryName(idx, event) {
+        if (!isBossMode) return;
+        event.stopPropagation();
+        const oldName = menuData[idx].name;
+        const newName = prompt("编辑分类名称：", oldName);
+        if (newName && newName !== oldName) {
+            menuData[idx].name = newName;
+            render();
+            initDraggable();
+        }
+    }
+
+    // 编辑菜品名称
+    function editFoodName(cIdx, fIdx, event) {
+        if (!isBossMode) return;
+        event.stopPropagation();
+        const oldName = menuData[cIdx].items[fIdx];
+        const newName = prompt("编辑菜品名称：", oldName);
+        if (newName && newName !== oldName) {
+            menuData[cIdx].items[fIdx] = newName;
+            render();
+            initDraggable();
+        }
+    }
+
+    async function loadFromCloud() {
+        const { data } = await supabaseClient.from('menu_storage').select('content').order('created_at', { ascending: false }).limit(1);
+        if (data && data.length > 0) { menuData = data[0].content; render(); }
+        document.getElementById('loading').style.display = 'none';
+    }
+
+    function toggleCategory(headerElement) {
+        if (isBossMode) return; // 编辑模式下不折叠，方便操作
+        headerElement.parentElement.classList.toggle('expanded');
+    }
+
+    function render() {
+        const renderArea = document.getElementById('menu-render');
+        const catSelect = document.getElementById('cat-select');
+        renderArea.innerHTML = ""; catSelect.innerHTML = "";
+        
+        menuData.forEach((cat, cIdx) => {
+            let section = document.createElement('div');
+            section.className = 'category-section' + (isBossMode ? ' expanded' : ''); 
+            section.dataset.index = cIdx;
+            section.innerHTML = `
+                <div class="category-header" onclick="toggleCategory(this)">
+                    <div class="drag-handle">≡</div>
+                    <div class="title-area">
+                        <span class="title-text editable" onclick="editCategoryName(${cIdx}, event)">${cat.name}</span>
+                        ${isBossMode ? '' : '<span class="arrow">▼</span>'}
+                    </div>
+                    <span class="delete-btn" onclick="event.stopPropagation(); removeCat(${cIdx})">删除分类</span>
+                </div>
+                <div class="category-content" data-cat-idx="${cIdx}">
+                    ${cat.items.map((food, fIdx) => `
+                        <div class="menu-item">
+                            <div class="drag-handle">≡</div>
+                            <div style="flex-grow:1; display:flex; align-items:center; overflow:hidden;">
+                                <span class="editable" style="font-weight:500" onclick="editFoodName(${cIdx}, ${fIdx}, event)">${food}</span>
+                                <span class="delete-btn" style="background:#fff1f0" onclick="removeFood(${cIdx}, ${fIdx})">删除</span>
+                            </div>
+                            ${isBossMode ? '' : `<div class="add-btn" onclick="addToCart('${food}')">+</div>`}
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+            renderArea.appendChild(section);
+            catSelect.innerHTML += `<option value="${cIdx}">${cat.name}</option>`;
+        });
+    }
+
+    function addToCart(food) {
+        cart[food] = (cart[food] || 0) + 1;
+        updateCartBar();
+    }
+
+    function updateCartBar() {
+        const bar = document.getElementById('cart-bar');
+        let total = 0;
+        for (let key in cart) { total += cart[key]; }
+        bar.style.display = total > 0 ? 'flex' : 'none';
+        document.getElementById('cart-info').innerText = `已选 ${total} 份美味`;
+    }
+
+    function sendOrderBatch() {
+        let orderList = [];
+        for (let food in cart) { orderList.push(`${food} x${cart[food]}`); }
+        const note = document.getElementById('note-input').value.trim();
+        let msg = orderList.join(', ');
+        if(note) msg += ` (备注：${note})`;
+        
+        const url = `https://api.day.app/${BARK_KEY}/新订单/太太想吃：${encodeURIComponent(msg)}?group=Kitchen&sound=calypso`;
+        fetch(url).then(() => {
+            alert("订单已发送！");
+            cart = {}; document.getElementById('note-input').value = ""; updateCartBar();
+        });
+    }
+
+    async function saveToCloud() {
+        const { error } = await supabaseClient.from('menu_storage').insert([{ content: menuData }]);
+        if(!error) {
+            alert("修改已保存同步！");
+            isBossMode = false;
+            document.getElementById('main-body').classList.remove('boss-mode');
+            document.getElementById('admin-panel').style.display = 'none';
+            render();
+        }
+    }
+
+    function addCategory() {
+        const n = document.getElementById('cat-input').value;
+        if(n){ menuData.push({name:n, items:[]}); render(); initDraggable(); document.getElementById('cat-input').value=""; }
+    }
+    function addFood() {
+        const i = document.getElementById('cat-select').value;
+        const f = document.getElementById('food-input').value;
+        if(f){ menuData[i].items.push(f); render(); initDraggable(); document.getElementById('food-input').value=""; }
+    }
+    function removeCat(idx) { if(confirm("确定删除分类吗？")) { menuData.splice(idx,1); render(); initDraggable(); } }
+    function removeFood(cIdx, fIdx) { if(confirm("确定删除菜品吗？")) { menuData[cIdx].items.splice(fIdx, 1); render(); initDraggable(); } }
+
+    loadFromCloud();
+</script>
+</body>
+</html>

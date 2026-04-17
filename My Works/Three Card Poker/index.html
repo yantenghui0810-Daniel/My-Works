@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>炸金花：全平台完美适配</title>
+    <style>
+        :root { --gold: #f1c40f; --table-green: #1a472a; --wood: #5d4037; --bg: #0a0a0a; --btn-h: 44px; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline: none; }
+        body { background: var(--bg); color: white; font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+        /* 主容器 */
+        .app-container { display: flex; flex-direction: column; height: 100%; max-width: 600px; margin: 0 auto; width: 100%; background: var(--table-green); position: relative; border-left: 2px solid var(--wood); border-right: 2px solid var(--wood); }
+
+        /* 顶部 AI 区域 */
+        .ai-zone { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; background: rgba(0,0,0,0.3); border-bottom: 2px solid var(--wood); }
+        .player-slot { background: rgba(0,0,0,0.5); border: 1px solid #444; border-radius: 8px; padding: 6px; text-align: center; position: relative; transition: 0.3s; }
+        .active-turn { border-color: var(--gold); box-shadow: 0 0 10px var(--gold); background: rgba(241, 196, 15, 0.2); }
+        .name-label { font-size: 12px; font-weight: bold; color: #ccc; }
+        .chips-label { font-size: 13px; color: var(--gold); }
+
+        /* 中间：筹码池与日志 */
+        .mid-zone { flex: 1; display: flex; flex-direction: column; position: relative; overflow: hidden; background: radial-gradient(circle, #2d5a27 0%, #1a472a 100%); }
+        .pot-info { padding: 10px; text-align: center; background: rgba(0,0,0,0.2); }
+        #pot-val { font-size: 28px; color: var(--gold); font-weight: bold; display: block; }
+        #game-log { flex: 1; padding: 10px; font-size: 12px; color: #aaa; overflow-y: auto; display: flex; flex-direction: column; }
+        #game-log div { margin-bottom: 4px; border-left: 2px solid #444; padding-left: 6px; }
+
+        /* 底部：人类操作区 */
+        .human-zone { background: #1a1a1a; padding: 12px; border-top: 3px solid var(--wood); box-shadow: 0 -5px 15px rgba(0,0,0,0.5); }
+        .my-info { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; }
+        .hand-display { display: flex; justify-content: center; gap: 8px; height: 60px; margin-bottom: 12px; align-items: center; }
+        
+        /* 卡牌样式 */
+        .card { width: 40px; height: 56px; background: #fff; color: #000; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 18px; box-shadow: 2px 2px 5px rgba(0,0,0,0.3); }
+        .card.hidden { background: linear-gradient(135deg, #c0392b 0%, #8e1e14 100%); color: transparent; }
+        .ai-card { width: 25px; height: 35px; font-size: 12px; }
+
+        /* 按钮布局 */
+        .btn-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        button { height: var(--btn-h); border: none; border-radius: 6px; font-weight: bold; color: #fff; font-size: 14px; cursor: pointer; }
+        button:active { filter: brightness(1.2); transform: translateY(1px); }
+        button:disabled { opacity: 0.2; transform: none; }
+        .bg-blue { background: #2980b9; } .bg-red { background: #c0392b; }
+        .bg-purple { background: #8e44ad; } .bg-gold { background: #d35400; }
+        .bg-green { background: #27ae60; }
+
+        /* 遮罩层 */
+        #pk-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none; z-index: 100; align-items: center; justify-content: center; font-size: 24px; color: var(--gold); font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div id="pk-overlay">比牌博弈中...</div>
+
+<div class="app-container">
+    <div class="ai-zone">
+        <div id="slot-0" class="player-slot">
+            <div class="name-label">欧阳虫</div>
+            <div class="chips-label">150</div>
+            <div class="hand-display" style="height:40px; gap:4px;"></div>
+        </div>
+        <div id="slot-1" class="player-slot">
+            <div class="name-label">马三千</div>
+            <div class="chips-label">150</div>
+            <div class="hand-display" style="height:40px; gap:4px;"></div>
+        </div>
+        <div id="slot-2" class="player-slot">
+            <div class="name-label">广王</div>
+            <div class="chips-label">150</div>
+            <div class="hand-display" style="height:40px; gap:4px;"></div>
+        </div>
+        <div id="slot-3" class="player-slot">
+            <div class="name-label">孔雀杨</div>
+            <div class="chips-label">150</div>
+            <div class="hand-display" style="height:40px; gap:4px;"></div>
+        </div>
+    </div>
+
+    <div class="mid-zone">
+        <div class="pot-info">
+            <span style="font-size:12px; color:#8db38d;">当前底池</span>
+            <span id="pot-val">0</span>
+            <button id="start-btn" class="bg-green" style="width:120px; height:36px; margin-top:5px;" onclick="initGame()">洗牌开始</button>
+        </div>
+        <div id="game-log">
+            <div style="color:var(--gold)">> 欢迎来到高压博弈场</div>
+        </div>
+    </div>
+
+    <div class="human-zone">
+        <div class="my-info">
+            <span id="is-looked" style="color:var(--gold)">等待发牌</span>
+            <span id="my-chips">筹码: 150</span>
+        </div>
+        <div class="hand-display" id="my-hand">
+            <div class="card hidden">?</div>
+            <div class="card hidden">?</div>
+            <div class="card hidden">?</div>
+        </div>
+        <div class="btn-grid">
+            <button class="bg-blue" id="btn-look" onclick="doLook()" disabled>看牌</button>
+            <button class="bg-purple" id="btn-pk" onclick="startPKMode()" disabled>比牌</button>
+            <button class="bg-red" id="btn-fold" onclick="doFold()" disabled>弃牌</button>
+        </div>
+        <div class="btn-grid" style="margin-top:8px;">
+            <button class="bg-gold" id="bet-btn-1" disabled>1分</button>
+            <button class="bg-gold" id="bet-btn-2" disabled>2分</button>
+            <button class="bg-gold" id="bet-btn-3" disabled>4分</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const NAMES = ["欧阳虫", "马三千", "广王", "孔雀杨", "我"];
+    const SUITS = {'♠':'black', '♥':'red', '♣':'black', '♦':'red'};
+    const RANKS = {'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,'J':11,'Q':12,'K':13,'A':14};
+    const MUFFLED_LEVELS = [1, 2, 4];
+    const LOOKED_LEVELS = [2, 5, 10];
+
+    let g = {
+        pot: 0, currentMinMuffled: 1, round: 1, turn: 4, 
+        activeIds: [], gameOver: true, lastBets: [],
+        players: Array(5).fill(0).map(() => ({ 
+            chips: 150, looked: false, folded: true, hand: [], score: null, 
+            forceReveal: false, aggression: Math.random() 
+        }))
+    };
+
+    function log(msg, imp = false) {
+        const el = document.getElementById('game-log');
+        const d = document.createElement('div');
+        if(imp) d.style.color = 'var(--gold)';
+        d.innerText = `> ${msg}`;
+        el.appendChild(d);
+        el.scrollTop = el.scrollHeight;
+    }
+
+    function initGame() {
+        if(!g.gameOver) return;
+        g.gameOver = false; g.pot = 0; g.currentMinMuffled = 1; g.round = 1;
+        g.activeIds = [0, 1, 2, 3, 4]; g.turn = 3; 
+        let deck = [];
+        for (let s in SUITS) for (let r in RANKS) deck.push({r, s, color: SUITS[s], v: RANKS[r]});
+        deck.sort(() => Math.random() - 0.5);
+        g.players.forEach((p, i) => {
+            p.hand = [deck.pop(), deck.pop(), deck.pop()];
+            p.score = evalHand(p.hand);
+            p.folded = false; p.looked = false; p.forceReveal = false;
+            p.chips -= 1; g.pot += 1;
+        });
+        document.getElementById('start-btn').style.display = 'none';
+        g.players.forEach((_, i) => updatePlayerUI(i));
+        refreshPotUI();
+        log("--- 150分场：节奏由你掌控 ---", true);
+        nextTurn();
+    }
+
+    function updatePlayerUI(id) {
+        const p = g.players[id];
+        const isObs = g.players[4].folded;
+        let canSee = (id === 4 && p.looked) || g.gameOver || p.forceReveal || (isObs && !p.folded);
+        
+        let cardsHtml = p.hand.map(c => {
+            let className = id === 4 ? "card" : "card ai-card";
+            return canSee ? `<div class="${className}" style="color:${c.color}">${c.r}${c.s}</div>` : `<div class="${className} hidden">?</div>`;
+        }).join('');
+
+        if(id === 4) {
+            document.getElementById('my-hand').innerHTML = cardsHtml || '<div class="card hidden"></div>'.repeat(3);
+            document.getElementById('is-looked').innerText = p.folded ? "已出局" : (p.looked ? "已看牌" : "闷牌中");
+        } else {
+            const slot = document.getElementById(`slot-${id}`);
+            slot.querySelector('.hand-display').innerHTML = cardsHtml;
+            slot.querySelector('.chips-label').innerText = p.chips;
+            slot.style.opacity = p.folded ? "0.2" : "1";
+        }
+    }
+
+    function nextTurn() {
+        if(g.gameOver) return;
+        if (g.activeIds.length <= 1) { checkGameOver(); return; }
+        do { g.turn = (g.turn + 1) % 5; if(g.turn === 4) g.round++; } while (g.players[g.turn].folded);
+        
+        document.querySelectorAll('.player-slot').forEach(s => s.classList.remove('active-turn'));
+        if(g.turn < 4) document.getElementById(`slot-${g.turn}`).classList.add('active-turn');
+        
+        if(g.turn === 4) { updateBetButtons(); enableControls(true); } 
+        else { enableControls(false); setTimeout(aiLogic, 1000); }
+    }
+
+    function aiLogic() {
+        let id = g.turn, p = g.players[id];
+        if(!p.looked && (g.round > 3 || Math.random() > 0.8)) {
+            p.looked = true; log(`${NAMES[id]} 看了看牌`);
+            updatePlayerUI(id);
+            setTimeout(() => aiAction(id, p), 600);
+        } else { aiAction(id, p); }
+    }
+
+    function aiAction(id, p) {
+        let strength = p.score.l;
+        // 手机端更激进一点
+        if (p.looked && strength === 0 && g.currentMinMuffled > 1) {
+            log(`${NAMES[id]} 觉得牌太小弃牌了`); foldPlayer(id); nextTurn(); return;
+        }
+        if (g.round > 5 && strength >= 1 && Math.random() > 0.85) {
+            executePK(id, g.activeIds.find(aid => aid !== id)); return;
+        }
+        doBet(p.looked ? LOOKED_LEVELS[MUFFLED_LEVELS.indexOf(g.currentMinMuffled)] : g.currentMinMuffled, g.currentMinMuffled);
+        setTimeout(nextTurn, 600);
+    }
+
+    function doBet(cost, mVal) {
+        const p = g.players[g.turn];
+        p.chips -= cost; g.pot += cost; g.currentMinMuffled = mVal;
+        log(`${NAMES[g.turn]} 跟注 ${cost}`);
+        refreshPotUI();
+        if(g.turn === 4) endHumanTurn();
+    }
+
+    function executePK(actor, target) {
+        let p = g.players[actor];
+        let cost = p.looked ? LOOKED_LEVELS[MUFFLED_LEVELS.indexOf(g.currentMinMuffled)] : g.currentMinMuffled;
+        p.chips -= cost; g.pot += cost; 
+        log(`【${NAMES[actor]}】发起了比牌！`, true);
+        const overlay = document.getElementById('pk-overlay');
+        overlay.style.display = 'flex';
+        setTimeout(() => {
+            g.players[target].forceReveal = true; g.players[actor].forceReveal = true;
+            updatePlayerUI(actor); updatePlayerUI(target);
+        }, 600);
+        setTimeout(() => {
+            if(compare(actor, target) > 0) foldPlayer(target); else foldPlayer(actor);
+            overlay.style.display = 'none';
+            g.players[target].forceReveal = false; g.players[actor].forceReveal = false;
+            g.players.forEach((_, i) => updatePlayerUI(i));
+            refreshPotUI(); checkGameOver(); if(!g.gameOver) nextTurn();
+        }, 3000);
+    }
+
+    function evalHand(h) {
+        let v = h.map(c => c.v).sort((a,b) => a-b);
+        let s = h.map(c => c.s);
+        let isFlush = s[0] === s[1] && s[1] === s[2];
+        let isStraight = (v[0]+1 === v[1] && v[1]+1 === v[2]) || (v[0]===2 && v[1]===3 && v[2]===14);
+        if (v[0] === v[2]) return { l: 5, name: "豹子" };
+        if (isFlush && isStraight) return { l: 4, name: "同花顺" };
+        if (isFlush) return { l: 3, name: "金花" };
+        if (isStraight) return { l: 2, name: "顺子" };
+        if (v[0] === v[1] || v[1] === v[2]) return { l: 1, name: "对子" };
+        return { l: 0, v: [v[2]], name: "高牌" };
+    }
+
+    function compare(aIdx, bIdx) {
+        let a = g.players[aIdx].score, b = g.players[bIdx].score;
+        if (a.l !== b.l) return a.l - b.l;
+        return Math.random() > 0.5 ? 1 : -1;
+    }
+
+    function updateBetButtons() {
+        const p = g.players[4];
+        [1, 2, 3].forEach(i => {
+            let mVal = MUFFLED_LEVELS[i-1], cost = p.looked ? LOOKED_LEVELS[i-1] : mVal;
+            let btn = document.getElementById(`bet-btn-${i}`);
+            btn.innerText = cost + "分";
+            btn.onclick = () => doBet(cost, mVal);
+            btn.disabled = (mVal < g.currentMinMuffled || p.chips < cost);
+        });
+    }
+
+    function doLook() { g.players[4].looked = true; updatePlayerUI(4); updateBetButtons(); }
+    function doFold() { foldPlayer(4); endHumanTurn(); }
+    function foldPlayer(id) { g.players[id].folded = true; g.activeIds = g.activeIds.filter(i => i !== id); updatePlayerUI(id); }
+    function endHumanTurn() { enableControls(false); refreshPotUI(); if(!checkGameOver()) setTimeout(nextTurn, 600); }
+    function refreshPotUI() { document.getElementById('pot-val').innerText = g.pot; document.getElementById('my-chips').innerText = "筹码: " + g.players[4].chips; }
+    function checkGameOver() {
+        if(g.activeIds.length === 1) {
+            g.gameOver = true; let winId = g.activeIds[0]; g.players[winId].chips += g.pot;
+            log(`赢家是：${NAMES[winId]}！`, true);
+            document.getElementById('start-btn').style.display = 'inline-block';
+            g.players.forEach((_, i) => updatePlayerUI(i)); return true;
+        } return false;
+    }
+    function startPKMode() { g.pkMode = true; log("请点击上方玩家头像进行比牌"); }
+    [0,1,2,3].forEach(i => {
+        document.getElementById(`slot-${i}`).onclick = () => { if(g.pkMode) { g.pkMode = false; executePK(4, i); } };
+    });
+    function enableControls(a) {
+        document.getElementById('btn-look').disabled = !a || g.players[4].looked || g.players[4].folded;
+        document.getElementById('btn-fold').disabled = !a || g.players[4].folded;
+        document.getElementById('btn-pk').disabled = !a || g.round < 3 || g.players[4].folded;
+        if(!a) document.querySelectorAll('.bg-gold').forEach(b => b.disabled = true);
+    }
+</script>
+</body>
+</html>

@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>周末去哪儿</title>
+    <style>
+        :root {
+            --primary: #007aff;
+            --accent: #ff2d55;
+            --glass: rgba(255, 255, 255, 0.92);
+        }
+
+        body {
+            margin: 0; padding: 0;
+            font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+            background: #050505; /* 纯黑背景让彩色文字更亮 */
+            height: 100vh; overflow: hidden;
+            display: flex; align-items: center; justify-content: center;
+        }
+
+        /* 乱序彩色地址池 */
+        #address-pool {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 1; pointer-events: none;
+        }
+
+        .pool-item {
+            position: absolute; white-space: nowrap;
+            font-weight: 900; opacity: 0.3; transition: all 0.2s;
+            filter: blur(0.5px);
+        }
+
+        /* 主容器 */
+        .main-card {
+            position: relative; z-index: 100;
+            background: var(--glass);
+            backdrop-filter: blur(20px);
+            padding: 35px; border-radius: 40px;
+            box-shadow: 0 0 80px rgba(0,113,227,0.25);
+            text-align: center; width: 90%; max-width: 480px;
+            transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+
+        #result-display {
+            font-size: 2.2rem; font-weight: 900; color: #1d1d1f;
+            margin: 25px 0; min-height: 3.5rem;
+            letter-spacing: -1px;
+            transition: color 0.3s;
+        }
+
+        /* 详情面板 */
+        #details-panel {
+            max-height: 0; overflow: hidden;
+            transition: max-height 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+            text-align: left;
+        }
+
+        .show-details #details-panel {
+            max-height: 600px; margin-top: 20px; 
+            padding-top: 20px; border-top: 1.5px dashed #ddd;
+        }
+
+        .info-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; }
+        .dist-badge { background: linear-gradient(135deg, #007aff, #00c6ff); color: #fff; padding: 5px 15px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; box-shadow: 0 4px 10px rgba(0,122,255,0.3); }
+        
+        h4 { margin: 15px 0 8px 0; color: #333; font-size: 0.95rem; display: flex; align-items: center; }
+        h4::before { content: ""; display: inline-block; width: 4px; height: 16px; background: var(--accent); margin-right: 8px; border-radius: 2px; }
+        
+        .tags { display: flex; flex-wrap: wrap; gap: 8px; }
+        .tags span { background: rgba(0,113,227,0.08); padding: 5px 12px; border-radius: 12px; font-size: 0.85rem; color: #0055b3; font-weight: 500; border: 1px solid rgba(0,113,227,0.1); }
+
+        button {
+            background: linear-gradient(180deg, #007aff, #0055b3); color: white; border: none;
+            padding: 16px 60px; font-size: 1.25rem; border-radius: 50px;
+            cursor: pointer; transition: 0.3s; font-weight: bold;
+            box-shadow: 0 10px 25px rgba(0,113,227,0.4);
+        }
+
+        button:hover { transform: translateY(-2px) scale(1.02); box-shadow: 0 15px 30px rgba(0,113,227,0.5); }
+        button:active { transform: translateY(1px); }
+
+        .system-tag { margin-top: 20px; font-size: 0.75rem; color: #999; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div id="address-pool"></div>
+
+<div class="main-card" id="card">
+    <div style="color: #007aff; font-size: 0.8rem; font-weight: 900; letter-spacing: 3px;">区域位置检索引擎</div>
+    <div id="result-display">等待启动</div>
+    
+    <div id="details-panel">
+        <div class="info-row">
+            <span style="font-weight: bold; color: #1d1d1f; font-size: 1.1rem;">探索报告</span>
+            <span class="dist-badge" id="dist-val">--</span>
+        </div>
+        
+        <h4>当地必去景点</h4>
+        <div class="tags" id="spots-tags"></div>
+        
+        <h4>必尝特色美食</h4>
+        <div class="tags" id="foods-tags"></div>
+    </div>
+
+    <button id="action-btn" onclick="handleAction()">开始探索</button>
+    <div class="system-tag">已连接：深圳地理数据中心 | 节点：89个</div>
+</div>
+
+<script>
+    const colors = ['#007aff', '#ff2d55', '#34c759', '#ff9500', '#af52de', '#5856d6', '#ff3b30', '#00c7be'];
+    
+    const db = {
+        "深圳市": { dist: "距离起点 0km", spots: ["平安金融中心", "世界之窗", "大梅沙", "欢乐海岸", "莲花山公园"], foods: ["光明乳鸽", "沙井鲜蚝", "公明烧鹅", "南山荔枝", "椰子鸡"] },
+        "广州市": { dist: "距离约 100-120km", spots: ["广州塔", "珠江新城", "陈家祠", "白云山", "长隆欢乐世界"], foods: ["白切鸡", "虾饺皇", "西关肠粉", "深井烧鹅", "干炒牛河"] },
+        "珠海市": { dist: "距离约 60-150km", spots: ["情侣路", "长隆海洋王国", "圆明新园", "珠海大剧院", "外伶仃岛"], foods: ["横琴蚝", "斗门重壳蟹", "唐家湾茶果", "万山对虾", "泥烩鸡"] },
+        "佛山市": { dist: "距离约 110-140km", spots: ["佛山祖庙", "西樵山", "逢简水乡", "顺德清晖园", "南风古灶"], foods: ["顺德双皮奶", "陈村粉", "伦教糕", "盲公饼", "佛山扎蹄"] },
+        "惠州市": { dist: "距离约 60-90km", spots: ["惠州西湖", "罗浮山", "巽寮湾", "双月湾", "南昆山"], foods: ["梅菜扣肉", "惠州盐焗鸡", "客家酿豆腐", "阿嬷叫", "敛步糕"] },
+        "东莞市": { dist: "距离约 40-80km", spots: ["松山湖", "东莞可园", "观音山森林公园", "鸦片战争博物馆", "下坝坊"], foods: ["烧鹅濑粉", "道滘肉丸", "虎门蟹饼", "厚街腊肠", "中堂鱼包"] },
+        "中山市": { dist: "距离约 60-100km", spots: ["孙中山故居", "中山影视城", "岭南詹园", "紫马岭公园", "中山长江叠翠"], foods: ["石岐乳鸽", "东升脆肉鲩", "黄圃腊肠", "三乡濑粉", "神湾菠萝"] },
+        "江门市": { dist: "距离约 120-170km", spots: ["赤坎古镇", "自力村碉楼", "圭峰山", "上下川岛", "小鸟天堂"], foods: ["新会陈皮", "台山黄鳝饭", "恩平濑粉", "古井烧鹅", "外海面"] },
+        "汕尾市": { dist: "距离约 130-180km", spots: ["红海湾", "凤山祖庙", "保利金町湾", "玄武山", "铜鼎山"], foods: ["客家擂茶", "汕尾菜茶", "海丰薄饼", "冬节鸽", "汕尾牛肉丸"] },
+        "肇庆市": { dist: "距离约 160-200km", spots: ["七星岩", "鼎湖山", "盘龙峡", "肇庆古城墙", "披云楼"], foods: ["肇庆裹蒸粽", "文庆鲤", "鼎湖上素", "封开油栗", "四会砂糖橘"] },
+        "清远市": { dist: "距离约 140-190km", spots: ["黄腾峡天门悬廊", "连州地下河", "古龙峡", "千年瑶寨", "宝晶宫"], foods: ["清远麻鸡", "九龙豆腐", "骆坑笋", "洲心烧肉", "东陂腊味"] },
+        "河源市": { dist: "距离约 150-190km", spots: ["万绿湖", "镜花缘", "霍山", "恐龙博物馆", "巴伐利亚庄园"], foods: ["东江酿豆腐", "东江盐焗鸡", "五指毛桃汤", "河源米粉", "客家猪脚粉"] },
+        "韶关市": { dist: "距离约 180-210km", spots: ["丹霞山", "南华寺", "云门山", "广东大峡谷", "梅关古道"], foods: ["冷水猪肚", "爆炒山坑螺", "龙归冷水肚", "大塘扣肉", "马坝油粘米"] },
+        "阳江市": { dist: "距离约 190-220km", spots: ["海陵岛", "十里银滩", "大角湾", "马尾岛", "凌霄岩"], foods: ["阳江豆豉", "猪肠碌", "程村蚝", "阳春春砂仁", "一夜埕"] },
+        "云浮市": { dist: "距离约 180-220km", spots: ["国恩寺", "蟠龙洞", "天露山", "金水台温泉", "大金山"], foods: ["新兴裹蒸粽", "罗定稻米", "郁南无核黄皮", "云安蚕茧", "新兴勒竹面"] }
+    };
+
+    const locations = [
+        "深圳市福田区", "深圳市宝安区", "深圳市龙岗区", "深圳市龙华区", "深圳市坪山区", "深圳市南山区", "广州市天河区", "广州市番禺区", "广州市南沙区", 
+        "东莞市南城街道", "东莞市虎门镇", "东莞市长安镇", "珠海市香洲区", "珠海市斗门区", "惠州市惠城区", "惠州市惠阳区",
+        "佛山市顺德区", "佛山市南海区", "中山市石岐街道", "中山市小榄镇", "江门市蓬江区", "江门市开平市",
+        "汕尾市海丰县", "汕尾市陆丰市", "肇庆市端州区", "肇庆市四会市", "清远市清城区", "清远市英德市", "河源市源城区", "河源市紫金县",
+        "韶关市新丰县", "阳江市阳春市", "云浮市新兴县"
+    ];
+
+    const pool = document.getElementById('address-pool');
+    const result = document.getElementById('result-display');
+    const card = document.getElementById('card');
+    const btn = document.getElementById('action-btn');
+    let isSpinning = false;
+    let timer, poolTimer;
+
+    function initPool() {
+        pool.innerHTML = '';
+        for(let i=0; i<80; i++) {
+            const span = document.createElement('span');
+            span.className = 'pool-item';
+            span.innerText = locations[i % locations.length];
+            span.style.color = colors[Math.floor(Math.random() * colors.length)];
+            randomize(span);
+            pool.appendChild(span);
+        }
+    }
+
+    function randomize(el) {
+        el.style.top = Math.random() * 95 + '%';
+        el.style.left = Math.random() * 85 + '%';
+        el.style.fontSize = (14 + Math.random() * 28) + 'px';
+        el.style.transform = `rotate(${(Math.random()-0.5)*30}deg)`;
+        el.style.opacity = Math.random() * 0.4 + 0.1;
+    }
+
+    function handleAction() {
+        if(isSpinning) {
+            isSpinning = false;
+            clearInterval(timer); clearInterval(poolTimer);
+            showResult();
+        } else {
+            isSpinning = true;
+            card.classList.remove('show-details');
+            result.style.color = '#1d1d1f';
+            btn.innerText = "停止检索";
+            
+            poolTimer = setInterval(() => {
+                document.querySelectorAll('.pool-item').forEach(item => {
+                    if(Math.random()>0.8) {
+                        randomize(item);
+                        item.style.color = colors[Math.floor(Math.random() * colors.length)];
+                    }
+                });
+            }, 100);
+            
+            timer = setInterval(() => {
+                result.innerText = locations[Math.floor(Math.random()*locations.length)];
+            }, 50);
+        }
+    }
+
+    function showResult() {
+        btn.innerText = "重新探索";
+        const finalLoc = result.innerText;
+        const cityName = finalLoc.substring(0, 3);
+        const data = db[cityName] || db["深圳市"]; // 兜底
+
+        document.getElementById('dist-val').innerText = data.dist;
+        
+        const renderTags = (id, list) => {
+            const container = document.getElementById(id);
+            container.innerHTML = '';
+            list.forEach(item => {
+                const s = document.createElement('span');
+                s.innerText = item;
+                container.appendChild(s);
+            });
+        };
+
+        renderTags('spots-tags', data.spots);
+        renderTags('foods-tags', data.foods);
+        
+        card.classList.add('show-details');
+        result.style.color = 'var(--accent)';
+        
+        // 停止时，背景地址池调暗
+        document.querySelectorAll('.pool-item').forEach(item => {
+            item.style.opacity = "0.05";
+        });
+    }
+
+    initPool();
+</script>
+</body>
+</html>

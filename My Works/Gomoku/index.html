@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>五子棋大师版</title>
+    <style>
+        body { 
+            display: flex; flex-direction: column; align-items: center; 
+            background: #f0f0f0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+            margin: 0; padding: 10px; touch-action: manipulation;
+        }
+        h2 { color: #333; margin: 10px 0; font-size: 1.4rem; }
+        .status { margin-bottom: 10px; font-size: 1.1em; font-weight: bold; height: 30px; color: #444; }
+        
+        .canvas-container {
+            width: 100%;
+            max-width: 600px;
+            aspect-ratio: 1 / 1;
+            position: relative;
+        }
+        canvas { 
+            background: #e6b37e; 
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3); 
+            border: 2px solid #8b4513; 
+            border-radius: 4px;
+            width: 100%; height: 100%;
+            display: block;
+        }
+
+        .btns { display: flex; gap: 10px; margin-top: 20px; width: 100%; max-width: 600px; }
+        button { 
+            flex: 1; padding: 12px; font-size: 16px; font-weight: bold;
+            background: #8b4513; color: white; border: none; 
+            border-radius: 8px; cursor: pointer; transition: 0.2s;
+        }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        button:active { transform: scale(0.98); filter: brightness(1.2); }
+    </style>
+</head>
+<body>
+    <h2>五子棋：你(白) vs AI(黑)</h2>
+    <div class="status" id="status">准备就绪</div>
+    
+    <div class="canvas-container">
+        <canvas id="board" width="600" height="600"></canvas>
+    </div>
+
+    <div class="btns">
+        <button onclick="undo()" id="undoBtn">悔棋</button>
+        <button onclick="resetGame()">重新开始</button>
+    </div>
+
+<script>
+    const canvas = document.getElementById('board');
+    const ctx = canvas.getContext('2d');
+    const statusTxt = document.getElementById('status');
+    const size = 15, padding = 35;
+    const cell = (canvas.width - padding * 2) / (size - 1);
+    
+    let board = [], gameOver = false, nextFirstHand = 2, history = [];
+
+    // 棋型权重表
+    const SCORE = {
+        WIN: 100000,     // 连五
+        LIVE_4: 10000,   // 活四
+        DUSHU_4: 5000,   // 冲四
+        LIVE_3: 1000,    // 活三
+        DUSHU_3: 500,    // 眠三
+        LIVE_2: 100,     // 活二
+        DUSHU_2: 10      // 眠二
+    };
+
+    function initBoard() {
+        board = Array.from({ length: size }, () => Array(size).fill(0));
+        history = [];
+        updateUndoButton();
+    }
+
+    function drawBoard() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.beginPath();
+        ctx.strokeStyle = "#333";
+        ctx.lineWidth = 1;
+        for (let i = 0; i < size; i++) {
+            ctx.moveTo(padding, padding + i * cell);
+            ctx.lineTo(canvas.width - padding, padding + i * cell);
+            ctx.moveTo(padding + i * cell, padding);
+            ctx.lineTo(padding + i * cell, canvas.height - padding);
+        }
+        ctx.stroke();
+
+        // 绘制星位
+        const dots = [[3,3], [11,3], [7,7], [3,11], [11,11]];
+        dots.forEach(p => {
+            ctx.beginPath();
+            ctx.arc(padding + p[1]*cell, padding + p[0]*cell, 5, 0, Math.PI*2);
+            ctx.fillStyle = "#333"; ctx.fill();
+        });
+
+        board.forEach((row, r) => row.forEach((val, c) => {
+            if (val !== 0) drawPieceGraphic(r, c, val);
+        }));
+    }
+
+    function drawPieceGraphic(r, c, type) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(padding + c * cell, padding + r * cell, cell * 0.42, 0, Math.PI * 2);
+        let g = ctx.createRadialGradient(padding+c*cell+3, padding+r*cell-3, cell*0.4, padding+c*cell+3, padding+r*cell-3, 0);
+        if (type === 1) { // 黑子
+            g.addColorStop(0, "#000"); g.addColorStop(1, "#666");
+        } else { // 白子
+            g.addColorStop(0, "#ddd"); g.addColorStop(1, "#fff");
+        }
+        ctx.fillStyle = g; 
+        ctx.shadowBlur = 5; ctx.shadowColor = "rgba(0,0,0,0.4)";
+        ctx.fill();
+        ctx.restore();
+    }
+
+    function checkWin(r, c, t) {
+        const dirs = [[1,0], [0,1], [1,1], [1,-1]];
+        for (let [dr, dc] of dirs) {
+            let count = 1;
+            for (let s of [1, -1]) {
+                let nr = r + dr*s, nc = c + dc*s;
+                while(nr>=0 && nr<size && nc>=0 && nc<size && board[nr][nc]===t) {
+                    count++; nr+=dr*s; nc+=dc*s;
+                }
+            }
+            if (count >= 5) return true;
+        }
+        return false;
+    }
+
+    // 核心AI：高阶评分引擎
+    function getLineScore(r, c, dr, dc, t) {
+        let count = 1, leftBlock = false, rightBlock = false;
+        
+        // 正向
+        let nr = r + dr, nc = c + dc;
+        while(nr>=0 && nr<size && nc>=0 && nc<size && board[nr][nc]===t) { count++; nr+=dr; nc+=dc; }
+        if (nr<0 || nr>=size || nc<0 || nc>=size || board[nr][nc] !== 0) rightBlock = true;
+
+        // 反向
+        nr = r - dr; nc = c - dc;
+        while(nr>=0 && nr<size && nc>=0 && nc<size && board[nr][nc]===t) { count++; nr-=dr; nc-=dc; }
+        if (nr<0 || nr>=size || nc<0 || nc>=size || board[nr][nc] !== 0) leftBlock = true;
+
+        if (count >= 5) return SCORE.WIN;
+        if (!leftBlock && !rightBlock) {
+            if (count === 4) return SCORE.LIVE_4;
+            if (count === 3) return SCORE.LIVE_3;
+            if (count === 2) return SCORE.LIVE_2;
+        } else if (!leftBlock || !rightBlock) {
+            if (count === 4) return SCORE.DUSHU_4;
+            if (count === 3) return SCORE.DUSHU_3;
+            if (count === 2) return SCORE.DUSHU_2;
+        }
+        return 0;
+    }
+
+    function evaluate(r, c) {
+        let score = 0;
+        const dirs = [[1,0], [0,1], [1,1], [1,-1]];
+        dirs.forEach(([dr, dc]) => {
+            let aiS = getLineScore(r, c, dr, dc, 1);
+            let userS = getLineScore(r, c, dr, dc, 2);
+            
+            // 防守逻辑：如果你有活三或冲四，AI会极大提升防守权重
+            score += aiS;
+            score += userS * 1.1; 
+        });
+        return score;
+    }
+
+    function aiMove() {
+        if (gameOver) return;
+        let best = -1, moves = [];
+        
+        // 性能优化：仅扫描已有棋子附近的空位
+        for(let r=0; r<size; r++) {
+            for(let c=0; c<size; c++) {
+                if(board[r][c] === 0) {
+                    let s = evaluate(r, c);
+                    if (s > best) { best = s; moves = [{r, c}]; }
+                    else if (s === best) { moves.push({r, c}); }
+                }
+            }
+        }
+        
+        let move = moves[Math.floor(Math.random() * moves.length)];
+        board[move.r][move.c] = 1;
+        history.push({r: move.r, c: move.c, type: 1});
+        drawBoard(); updateUndoButton();
+
+        if (checkWin(move.r, move.c, 1)) {
+            statusTxt.innerText = "AI 获胜！大师仍是大师。";
+            statusTxt.style.color = "#d32f2f";
+            nextFirstHand = 1; gameOver = true;
+        } else { statusTxt.innerText = "该你了 (白棋)"; }
+    }
+
+    function undo() {
+        if (gameOver || history.length < 1) return;
+        let last = history.pop(); board[last.r][last.c] = 0;
+        if (last.type === 1 && history.length > 0) {
+            let userLast = history.pop(); board[userLast.r][userLast.c] = 0;
+        }
+        drawBoard(); statusTxt.innerText = "已悔棋"; statusTxt.style.color = "#444";
+        updateUndoButton();
+    }
+
+    function updateUndoButton() {
+        document.getElementById('undoBtn').disabled = (history.length === 0 || gameOver);
+    }
+
+    canvas.addEventListener('click', (e) => {
+        if (gameOver) return;
+        const rect = canvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+        const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+        const c = Math.round((x - padding) / cell), r = Math.round((y - padding) / cell);
+        
+        if (r>=0 && r<size && c>=0 && c<size && board[r][c]===0) {
+            board[r][c] = 2; history.push({r, c, type: 2});
+            drawBoard(); updateUndoButton();
+            if (checkWin(r,c,2)) {
+                statusTxt.innerText = "竟然赢了！你才是大师。";
+                statusTxt.style.color = "#388e3c";
+                nextFirstHand = 2; gameOver = true;
+            } else {
+                statusTxt.innerText = "AI 思考中...";
+                setTimeout(aiMove, 400);
+            }
+        }
+    });
+
+    function resetGame() {
+        initBoard(); drawBoard(); gameOver = false;
+        statusTxt.style.color = "#444";
+        if (nextFirstHand === 1) { 
+            statusTxt.innerText = "AI 获胜先手 (黑)..."; 
+            setTimeout(aiMove, 500); 
+        } else { statusTxt.innerText = "你获胜先手 (白)，请落子"; }
+    }
+
+    window.onload = resetGame;
+</script>
+</body>
+</html>

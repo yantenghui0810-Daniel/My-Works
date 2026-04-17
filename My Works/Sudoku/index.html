@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>极简数独 - 关卡版</title>
+    <style>
+        :root {
+            --bg-color: #f8f9fa;
+            --main-text: #2c3e50;
+            --cell-size: min(55px, 10vw);
+            /* 线条颜色 */
+            --line-thick: #000000; /* 粗线颜色：纯黑 */
+            --line-thin: #bdc3c7;  /* 细线颜色：灰色 */
+            --primary: #3498db;
+            --fixed-bg: #f1f3f5;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--main-text);
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        h1 { margin-top: 0; font-weight: 300; letter-spacing: 2px; }
+
+        .header-controls {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        select, button {
+            padding: 10px 15px;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+            font-size: 14px;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            font-weight: bold;
+        }
+
+        button:hover { opacity: 0.9; transform: translateY(-1px); }
+
+        /* 数独盘面核心样式 */
+        .sudoku-container {
+            position: relative;
+            background-color: var(--line-thick); /* 关键：背景色即为粗线色 */
+            padding: 3px; /* 最外层边框厚度 */
+            border-radius: 4px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.15);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(9, var(--cell-size));
+            grid-template-rows: repeat(9, var(--cell-size));
+            background-color: var(--line-thin); /* 细线颜色 */
+            gap: 1px; /* 默认细格线 */
+        }
+
+        .cell {
+            width: var(--cell-size);
+            height: var(--cell-size);
+            background-color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: calc(var(--cell-size) * 0.5);
+            font-weight: 400;
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+
+        /* 绘制 3x3 粗分割线 */
+        /* 每 3 列的右边加粗线 */
+        .cell:nth-child(3n) { border-right: 2px solid var(--line-thick); }
+        .cell:nth-child(9n) { border-right: none; } /* 去掉最右边的多余线 */
+
+        /* 第 3 行和第 6 行的底边加粗线 */
+        .cell:nth-child(n+19):nth-child(-n+27),
+        .cell:nth-child(n+46):nth-child(-n+54) {
+            border-bottom: 2px solid var(--line-thick);
+        }
+
+        /* 格子各种状态 */
+        .cell.fixed { background-color: var(--fixed-bg); color: #000; font-weight: 700; }
+        .cell.selected { background-color: #d1e9ff !important; box-shadow: inset 0 0 0 3px var(--primary); z-index: 10; }
+        .cell.related { background-color: #f0f7ff; }
+        .cell.error { color: #e74c3c !important; background-color: #ffdada !important; }
+
+        /* 数字键盘 */
+        .numpad {
+            margin-top: 25px;
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            max-width: 400px;
+            width: 100%;
+        }
+
+        .numpad button {
+            height: 50px;
+            background: white;
+            color: var(--main-text);
+            border: 1px solid #ddd;
+            font-size: 18px;
+        }
+
+        .numpad button.clear-btn { background: #95a5a6; color: white; grid-column: span 1; }
+        .numpad button:active { background: #eee; }
+
+        .status { margin-top: 15px; font-weight: bold; color: #27ae60; height: 20px; }
+    </style>
+</head>
+<body>
+
+    <h1>SUDOKU</h1>
+
+    <div class="header-controls">
+        <select id="difficulty">
+            <option value="30">简单级别</option>
+            <option value="40" selected>一般级别</option>
+            <option value="50">困难级别</option>
+            <option value="56">专业级别</option>
+            <option value="62">地狱级别</option>
+        </select>
+        <button onclick="newGame()">新局</button>
+        <button onclick="checkResult()" style="background: #2ecc71;">检查</button>
+    </div>
+
+    <div class="sudoku-container">
+        <div class="grid" id="grid"></div>
+    </div>
+
+    <div id="msg" class="status"></div>
+
+    <div class="numpad">
+        <button onclick="inputNum(1)">1</button>
+        <button onclick="inputNum(2)">2</button>
+        <button onclick="inputNum(3)">3</button>
+        <button onclick="inputNum(4)">4</button>
+        <button onclick="inputNum(5)">5</button>
+        <button onclick="inputNum(6)">6</button>
+        <button onclick="inputNum(7)">7</button>
+        <button onclick="inputNum(8)">8</button>
+        <button onclick="inputNum(9)">9</button>
+        <button onclick="inputNum(0)" class="clear-btn">X</button>
+    </div>
+
+    <script>
+        let selectedIdx = -1;
+        let board = Array(81).fill(0);
+        let puzzle = Array(81).fill(0);
+
+        function createGrid() {
+            const grid = document.getElementById('grid');
+            grid.innerHTML = '';
+            for (let i = 0; i < 81; i++) {
+                const div = document.createElement('div');
+                div.className = 'cell';
+                div.onclick = () => selectCell(i);
+                grid.appendChild(div);
+            }
+        }
+
+        function selectCell(idx) {
+            selectedIdx = idx;
+            const cells = document.querySelectorAll('.cell');
+            cells.forEach(c => c.classList.remove('selected', 'related'));
+            
+            const r = Math.floor(idx / 9);
+            const c = idx % 9;
+            
+            cells.forEach((cell, i) => {
+                const ir = Math.floor(i / 9);
+                const ic = i % 9;
+                if (i === idx) cell.classList.add('selected');
+                else if (ir === r || ic === c) cell.classList.add('related');
+            });
+        }
+
+        function inputNum(n) {
+            if (selectedIdx === -1 || puzzle[selectedIdx] !== 0) return;
+            board[selectedIdx] = n;
+            const cell = document.querySelectorAll('.cell')[selectedIdx];
+            cell.textContent = n === 0 ? '' : n;
+            validate();
+        }
+
+        // 基础检测：行、列、宫
+        function validate() {
+            const cells = document.querySelectorAll('.cell');
+            cells.forEach(c => c.classList.remove('error'));
+            
+            for (let i = 0; i < 81; i++) {
+                if (board[i] === 0) continue;
+                const r = Math.floor(i / 9), c = i % 9;
+                const b = Math.floor(r/3)*3 + Math.floor(c/3);
+                
+                for (let j = 0; j < 81; j++) {
+                    if (i === j || board[j] === 0) continue;
+                    const jr = Math.floor(j/9), jc = j % 9;
+                    const jb = Math.floor(jr/3)*3 + Math.floor(jc/3);
+                    
+                    if ((r === jr || c === jc || b === jb) && board[i] === board[j]) {
+                        cells[i].classList.add('error');
+                    }
+                }
+            }
+        }
+
+        function newGame() {
+            document.getElementById('msg').textContent = '';
+            // 简单数独生成逻辑
+            const sol = generateSolution();
+            const diff = parseInt(document.getElementById('difficulty').value);
+            board = [...sol];
+            
+            // 挖洞
+            let count = 0;
+            while(count < diff) {
+                let r = Math.floor(Math.random()*81);
+                if(board[r] !== 0) {
+                    board[r] = 0;
+                    count++;
+                }
+            }
+            
+            puzzle = [...board];
+            const cells = document.querySelectorAll('.cell');
+            cells.forEach((cell, i) => {
+                cell.classList.remove('fixed', 'error');
+                if (board[i] !== 0) {
+                    cell.textContent = board[i];
+                    cell.classList.add('fixed');
+                } else {
+                    cell.textContent = '';
+                }
+            });
+        }
+
+        function generateSolution() {
+            const s = Array(81).fill(0);
+            const isValid = (idx, n) => {
+                const r = Math.floor(idx/9), c = idx%9;
+                for(let i=0; i<9; i++) {
+                    if(s[r*9+i]===n || s[i*9+c]===n) return false;
+                }
+                const br=Math.floor(r/3)*3, bc=Math.floor(c/3)*3;
+                for(let i=0; i<3; i++) for(let j=0; j<3; j++) {
+                    if(s[(br+i)*9+(bc+j)]===n) return false;
+                }
+                return true;
+            };
+            const fill = (idx) => {
+                if(idx === 81) return true;
+                const nums = [1,2,3,4,5,6,7,8,9].sort(()=>Math.random()-0.5);
+                for(let n of nums) {
+                    if(isValid(idx, n)) {
+                        s[idx] = n;
+                        if(fill(idx+1)) return true;
+                        s[idx] = 0;
+                    }
+                }
+                return false;
+            };
+            fill(0);
+            return s;
+        }
+
+        function checkResult() {
+            if (board.includes(0)) {
+                alert('请先完成所有空格！');
+                return;
+            }
+            if (document.querySelectorAll('.error').length > 0) {
+                alert('盘面存在逻辑错误，请检查红色数字。');
+            } else {
+                document.getElementById('msg').textContent = '🎉 完美通关！';
+            }
+        }
+
+        // 监听键盘
+        window.onkeydown = (e) => {
+            if (e.key >= '1' && e.key <= '9') inputNum(parseInt(e.key));
+            if (e.key === 'Backspace' || e.key === 'Delete') inputNum(0);
+        };
+
+        createGrid();
+        newGame();
+    </script>
+</body>
+</html>
